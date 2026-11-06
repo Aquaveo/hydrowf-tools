@@ -1,0 +1,11 @@
+# cwltool ../ngiab-preprocess.cwl job.yml
+# Hydrofabric lives outside the repo, in ~/work/ciroh/data/hydrofabric
+feature: gage-01031510
+start_date: "2020-01-01"
+end_date: "2020-01-31"
+hydrofabric: 
+  class: File
+  path: ../../../../data/hydrofabric/conus_nextgen.gpkg
+hydrofabric_graph: 
+  class: File
+  path: ../../../../data/hydrofabric/conus_igraph_network.gpickle
