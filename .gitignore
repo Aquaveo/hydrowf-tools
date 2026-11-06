@@ -1,3 +1,10 @@
+# local test data and cwltool outputs
+**/tests/*/
+!**/tests/*.yml
+teehr/
+*.tmp
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

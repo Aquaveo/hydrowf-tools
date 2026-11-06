@@ -1,0 +1,5 @@
+# Example inputs for a local run:
+#   cwltool ../ngiab-teehr.cwl job.yml
+ngen_run:
+  class: Directory
+  path: ./AWI_16_2863657_007   # an NGIAB run folder
