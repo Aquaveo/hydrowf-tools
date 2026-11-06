@@ -1,0 +1,5 @@
+# cwltool ../ngiab-run.cwl job.yml
+# Input: the run folder made by ../../ngiab-preprocess/tests (run that test first)
+ngen_run:
+  class: Directory
+  path: ../../ngiab-preprocess/tests/ngen-run
