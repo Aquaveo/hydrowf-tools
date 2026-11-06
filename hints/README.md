@@ -13,6 +13,12 @@ Namespace: `hydrowf: https://github.com/Aquaveo/hydrowf-tools/tree/main/hints#`
 Not supported: `InlineJavascriptRequirement`, `ExpressionTool`, `when`,
 `secondaryFiles` patterns, `scatter`.
 
+### Images with an ENTRYPOINT
+
+cwltool keeps the image's ENTRYPOINT, so for those images the CWL has no `baseCommand`
+and `arguments` go to the ENTRYPOINT (see `nextgen/ngiab-run`). The Argo translator
+does the same: it puts everything in the container's `args`, never `command`.
+
 ## Hints
 
 | Hint | Fields | Purpose |
