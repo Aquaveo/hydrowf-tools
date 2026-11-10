@@ -16,9 +16,9 @@ $namespaces:
 
 requirements:
   DockerRequirement:
-    # Built from ./Dockerfile: Aquaveo/NGIAB_data_preprocess@6ba8037 (upstream 4088447 + run-relative
-    # SNOW17/SAC-SMA parameter paths, NGIAB_data_preprocess#273). `cli` is on PATH.
-    dockerPull: hydrowf/ngiab-preprocess:4.9.5.dev2-6ba8037
+      # Built from ./Dockerfile: Aquaveo/NGIAB_data_preprocess@02c4145 (upstream 4088447 + NGIAB_data_preprocess#273
+    # run-relative SNOW17/SAC-SMA paths + #275 SNOW17 raim coupling). `cli` is on PATH.
+    dockerPull: hydrowf/ngiab-preprocess:4.9.5.dev2-02c4145
   NetworkAccess:
     networkAccess: true          # forcings read s3://noaa-nwm-retrospective-3-0-pds or s3://noaa-nws-aorc-v1-1-1km
   InitialWorkDirRequirement:
