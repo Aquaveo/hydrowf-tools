@@ -3,8 +3,10 @@
 Subsets the v2.2 hydrofabric upstream of a catchment or gage, builds forcings
 (NWM 3.0 retrospective or AORC) and writes the ngen realization for a model.
 
-- Image: `awiciroh/preprocessor` pinned by digest (v4.9.4), built from
-  https://github.com/CIROH-UA/NGIAB_data_preprocess/blob/main/aws_tools/aws.dockerfile
+- Image: `hydrowf/ngiab-preprocess:4.9.5.dev2-6ba8037`, built from `Dockerfile` here. Temporary: it
+  installs Aquaveo/NGIAB_data_preprocess@6ba8037, which is upstream main 4088447 (includes #270, the
+  dhbv2_daily template fix) plus run-relative SNOW17/SAC-SMA parameter paths (NGIAB_data_preprocess#273).
+  Go back to a PyPI release once both fixes are released.
 - Inputs: catchment or gage ID, start and end dates, optional model, and the CONUS
   hydrofabric (`conus_nextgen.gpkg`, 4.9 GB) plus its graph (`conus_igraph_network.gpickle`)
 - Output `ngen_run`: an NGIAB run folder (`config/`, `forcings/`, `metadata/`)
