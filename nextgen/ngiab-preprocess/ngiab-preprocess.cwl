@@ -16,9 +16,9 @@ $namespaces:
 
 requirements:
   DockerRequirement:
-    # Upstream image: aws_tools/aws.dockerfile, pushed by .github/workflows/docker.yml on each release.
-    # This digest is v4.9.4 (tag 451609cb8ab894b1bc49eb69105e98b020f0d36f), `cli` is on PATH.
-    dockerPull: hydrowf/ngiab-preprocess:4.9.4
+      # Built from ./Dockerfile: Aquaveo/NGIAB_data_preprocess@02c4145 (upstream 4088447 + NGIAB_data_preprocess#273
+    # run-relative SNOW17/SAC-SMA paths + #275 SNOW17 raim coupling). `cli` is on PATH.
+    dockerPull: hydrowf/ngiab-preprocess:4.9.5.dev2-02c4145
   NetworkAccess:
     networkAccess: true          # forcings read s3://noaa-nwm-retrospective-3-0-pds or s3://noaa-nws-aorc-v1-1-1km
   InitialWorkDirRequirement:
