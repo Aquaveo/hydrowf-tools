@@ -1,0 +1,12 @@
+# Calibration needs about 2 years. Make the input run folder here first:
+#   cwltool ../../ngiab-preprocess/ngiab-preprocess.cwl preprocess-2y.yml
+feature: gage-01031510
+start_date: "2017-10-01"
+end_date: "2019-09-30"
+run_name: cfe-cal
+hydrofabric:
+  class: File
+  path: ../../../../data/hydrofabric/conus_nextgen.gpkg
+hydrofabric_graph:
+  class: File
+  path: ../../../../data/hydrofabric/conus_igraph_network.gpickle

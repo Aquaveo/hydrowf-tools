@@ -1,0 +1,12 @@
+# cwltool --parallel --cachedir cache ../ngiab-simulation.cwl ngiab-simulation.yml
+# gage-01031510, 2 water years
+feature: gage-01031510
+start_date: "2017-10-01"
+end_date: "2019-09-30"
+run_name: cfe-01031510
+hydrofabric:
+  class: File
+  path: ../../../data/hydrofabric/conus_nextgen.gpkg
+hydrofabric_graph:
+  class: File
+  path: ../../../data/hydrofabric/conus_igraph_network.gpickle

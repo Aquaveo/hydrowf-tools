@@ -1,0 +1,7 @@
+# cwltool ../ngiab-calibrate.cwl job.yml
+# Input: the 2-year run folder made by preprocess-2y.yml (run that first). 3 iterations: a plumbing test.
+ngen_run:
+  class: Directory
+  path: cfe-cal
+gage: "01031510"
+iterations: 3
