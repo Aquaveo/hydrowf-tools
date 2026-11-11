@@ -9,6 +9,7 @@ Namespace: `hydrowf: https://github.com/Aquaveo/hydrowf-tools/tree/main/hints#`
   `NetworkAccess`, `InitialWorkDirRequirement` (plain listing)
 - Types: `File`, `Directory`, `string`, `int`, `float`, `boolean`, `enum`, arrays of these
 - `inputBinding`, `outputBinding.glob`, `format`, parameter references such as `$(inputs.x.basename)`
+- `outputBinding.glob` is an exact path, no wildcards: an Argo output artifact needs one path
 
 Not supported: `InlineJavascriptRequirement`, `ExpressionTool`, `when`,
 `secondaryFiles` patterns, `scatter`.
@@ -17,7 +18,10 @@ Not supported: `InlineJavascriptRequirement`, `ExpressionTool`, `when`,
 
 cwltool keeps the image's ENTRYPOINT, so for those images the CWL has no `baseCommand`
 and `arguments` go to the ENTRYPOINT (see `nextgen/ngiab-run`). The Argo translator
-does the same: it puts everything in the container's `args`, never `command`.
+does the same: it sets the container's `command` to the image's ENTRYPOINT (or to
+`baseCommand` if the image has none) and puts the rest in `args`. Argo's executor needs
+the command; with `args` only, it asks the registry for the ENTRYPOINT, which fails for
+images that are only local.
 
 ## Hints
 
