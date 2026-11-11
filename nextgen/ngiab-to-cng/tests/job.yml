@@ -1,0 +1,3 @@
+ngen_run:
+  class: Directory
+  path: ../../ngiab-run/tests/ngen-run
