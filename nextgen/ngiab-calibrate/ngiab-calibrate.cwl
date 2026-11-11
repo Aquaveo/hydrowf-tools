@@ -19,25 +19,19 @@ $namespaces:
 requirements:
   DockerRequirement:
     # Local image built from Dockerfile in this folder
-    dockerPull: hydrowf/ngiab-calibrate:0.1.0
+    dockerPull: hydrowf/ngiab-calibrate:0.2.0
     dockerOutputDirectory: /cwl-output   # fixed path, so --cachedir keys repeat (cwltool otherwise picks a random one per run)
-  InitialWorkDirRequirement:
-    listing:
-      # Writable copy, staged as <run>_calibrated so it doesn't collide with the uncalibrated run
-      - entryname: $(inputs.ngen_run.basename)_calibrated
-        entry: $(inputs.ngen_run)
-        writable: true
   NetworkAccess:
     networkAccess: true   # USGS observations
   ResourceRequirement:
     coresMin: 4           # mpi-ngen runs mpirun -n $(nproc) with partitions, each iteration
     ramMin: 4096          # placeholder: measure on a large run
 
-# No baseCommand: the arguments go to the image's ENTRYPOINT (ngiab_calibrate.sh).
-# CWL v1.2: staging with entryname updates inputs.ngen_run.basename to <run>_calibrated.
+# No baseCommand: the arguments go to the image's ENTRYPOINT (ngiab_calibrate.sh), which copies
+# the input run folder to <run>_calibrated in the output dir and calibrates the copy.
 arguments:
-  - position: 0
-    valueFrom: $(runtime.outdir)/$(inputs.ngen_run.basename)
+  - position: 1
+    valueFrom: $(runtime.outdir)/$(inputs.ngen_run.basename)_calibrated
 
 inputs:
   ngen_run:
@@ -45,34 +39,35 @@ inputs:
     loadListing: deep_listing   # list the files, so the --cachedir key changes when the contents do
     label: NextGen run folder (CFE + Noah-OWP-Modular)
     doc: From ngiab-preprocess with the default formulation (no model input).
+    inputBinding: {position: 0}
     hydrowf:port: ngen.run
   gage:
     type: string
     label: USGS gage ID
     doc: For example 01031510 or gage-01031510. Must be in the subset's flowpath-attributes.
-    inputBinding: {position: 1}
+    inputBinding: {position: 2}
   iterations:
     type: int
     default: 100
     label: DDS iterations
-    inputBinding: {position: 2}
+    inputBinding: {position: 3}
   warmup_days:
     type: int
     default: 365
     label: Warm-up days excluded from the objective
-    inputBinding: {position: 3}
+    inputBinding: {position: 4}
   calibration_ratio:
     type: float
     default: 0.5
     label: Share of the period after warm-up used for calibration (the rest is validation)
-    inputBinding: {position: 4}
+    inputBinding: {position: 5}
 
 outputs:
   ngen_run:
     type: Directory
     label: Calibrated NextGen run folder (<run>_calibrated)
     outputBinding:
-      glob: "*_calibrated"   # not $(inputs.ngen_run.basename): on a --cachedir hit cwltool does not apply the entryname rename
+      glob: $(inputs.ngen_run.basename)_calibrated
     hydrowf:port: ngen.run
 
 hints:

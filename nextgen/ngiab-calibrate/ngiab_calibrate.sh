@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
-# Calibrates an NGIAB run folder with ngiab-cal + ngen-cal and writes the calibrated
-# model_params into its config/realization.json.
-# Usage: ngiab_calibrate.sh <run dir, writable> <gage id> <iterations> <warmup days> <calibration ratio>
+# Copies an NGIAB run folder, calibrates the copy with ngiab-cal + ngen-cal and writes the
+# calibrated model_params into its config/realization.json.
+# Usage: ngiab_calibrate.sh <run dir> <output dir> <gage id> <iterations> <warmup days> <calibration ratio>
 set -euo pipefail
-run=$(cd "$1" && pwd); gage=${2#gage-}; iterations=$3; warmup=$4; ratio=$5
+src=$(cd "$1" && pwd); gage=${3#gage-}; iterations=$4; warmup=$5; ratio=$6
+
+# The input may be read-only (cwltool) and the output path is fixed by the caller (an exact
+# CWL glob / Argo artifact path), so copy here instead of staging with a renamed entry.
+[ -e "$2" ] && { echo "ngiab_calibrate: $2 already exists" >&2; exit 1; }
+cp -R "$src" "$2"
+run=$(cd "$2" && pwd)
 
 # ngiab-cal and ngen-cal use the fixed path /ngen/ngen/data (ngiab-cal __main__.py:50,
 # ngiab_cal_template.yaml workdir). In this image /ngen/ngen/data -> /tmp/ngiab-data.
