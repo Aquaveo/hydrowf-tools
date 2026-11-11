@@ -19,6 +19,7 @@ requirements:
       # Built from ./Dockerfile: Aquaveo/NGIAB_data_preprocess@02c4145 (upstream 4088447 + NGIAB_data_preprocess#273
     # run-relative SNOW17/SAC-SMA paths + #275 SNOW17 raim coupling). `cli` is on PATH.
     dockerPull: hydrowf/ngiab-preprocess:4.9.5.dev2-02c4145
+    dockerOutputDirectory: /cwl-output   # fixed path, so --cachedir keys repeat (cwltool otherwise picks a random one per run)
   NetworkAccess:
     networkAccess: true          # forcings read s3://noaa-nwm-retrospective-3-0-pds or s3://noaa-nws-aorc-v1-1-1km
   InitialWorkDirRequirement:
