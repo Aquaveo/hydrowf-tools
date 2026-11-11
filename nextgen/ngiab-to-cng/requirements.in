@@ -1,0 +1,10 @@
+geopandas
+netCDF4
+pyarrow
+pyiceberg
+pyogrio
+pyproj
+rasterio
+rioxarray
+xarray
+zarr
