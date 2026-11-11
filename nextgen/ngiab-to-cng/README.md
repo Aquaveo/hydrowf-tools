@@ -1,6 +1,7 @@
 # ngiab-to-cng
 
-Converts a finished NGIAB run folder (from ngiab-run) into cloud-native files. It writes `cng/`:
+Converts a finished NGIAB run folder (from ngiab-run) into cloud-native files. It writes `<run>_cng/`,
+named after the run folder so two conversions in one pipeline don't collide:
 
 | Path | Format | Contents |
 |---|---|---|

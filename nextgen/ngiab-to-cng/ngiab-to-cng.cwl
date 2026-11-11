@@ -5,7 +5,7 @@ class: CommandLineTool
 id: ngiab-to-cng
 label: NGIAB run to cloud-native files
 doc: |
-  Writes a cng/ folder from an NGIAB run folder:
+  Writes <run>_cng/ (named after the run folder) from an NGIAB run folder:
   - timeseries/*.parquet: catchment, nexus, t-route and forcing time series in the
     TEEHR 0.8 secondary timeseries schema; timeseries/*.zarr: the same values as
     (location_id, time) arrays
@@ -22,6 +22,7 @@ requirements:
   DockerRequirement:
     # Local image built from Dockerfile in this folder
     dockerPull: hydrowf/ngiab-to-cng:0.1.0
+    dockerOutputDirectory: /cwl-output   # fixed path, so --cachedir keys repeat (cwltool otherwise picks a random one per run)
   ResourceRequirement:
     coresMin: 1
     ramMin: 2048       # placeholder: measure on a large run
@@ -29,11 +30,12 @@ requirements:
 # No baseCommand: the arguments go to the image's ENTRYPOINT (python /app/ngiab_to_cng.py).
 arguments:
   - prefix: --output
-    valueFrom: $(runtime.outdir)/cng
+    valueFrom: $(runtime.outdir)/$(inputs.ngen_run.basename)_cng
 
 inputs:
   ngen_run:
     type: Directory
+    loadListing: deep_listing   # list the files, so the --cachedir key changes when the contents do
     label: NextGen run folder with outputs
     doc: From ngiab-run (config/, forcings/, outputs/ngen, outputs/troute).
     inputBinding: {position: 1}
@@ -53,7 +55,7 @@ outputs:
     type: Directory
     label: Cloud-native run outputs
     outputBinding:
-      glob: cng
+      glob: $(inputs.ngen_run.basename)_cng
     hydrowf:port: ngen.cng
 
 hints:
