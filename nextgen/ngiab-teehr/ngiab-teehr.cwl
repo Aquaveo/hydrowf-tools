@@ -17,6 +17,7 @@ $namespaces:
 requirements:
   DockerRequirement:
     dockerPull: awiciroh/ngiab-teehr:x86   # TODO: pin a version tag or digest
+    dockerOutputDirectory: /cwl-output   # fixed path, so --cachedir keys repeat (cwltool otherwise picks a random one per run)
   NetworkAccess:
     networkAccess: true                     # TEEHR downloads USGS and NWM data
   InitialWorkDirRequirement:
@@ -40,6 +41,7 @@ arguments:
 inputs:
   ngen_run:
     type: Directory
+    loadListing: deep_listing   # list the files, so the --cachedir key changes when the contents do
     label: NextGen run
     doc: NGIAB run folder (config/, hydrofabric, outputs/troute/) produced by ngiab-run.
     hydrowf:port: ngen.run
