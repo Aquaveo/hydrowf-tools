@@ -1,0 +1,14 @@
+# cwltool --parallel --cachedir cache ../ngiab-calibration.cwl ngiab-calibration.yml
+# gage-01031510, 2 water years, 3 iterations (a plumbing test; use the default 100 for real results)
+feature: gage-01031510
+gage: "01031510"
+start_date: "2017-10-01"
+end_date: "2019-09-30"
+run_name: cfe-01031510
+iterations: 3
+hydrofabric:
+  class: File
+  path: ../../../data/hydrofabric/conus_nextgen.gpkg
+hydrofabric_graph:
+  class: File
+  path: ../../../data/hydrofabric/conus_igraph_network.gpickle
