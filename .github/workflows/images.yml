@@ -1,0 +1,102 @@
+name: tool images
+
+# Builds the tool images under nextgen/ (one per Dockerfile), scans them with Grype, and publishes
+# releases to ghcr.io/aquaveo/<tool>:<version>.
+#
+# Release a tool by pushing a tag <tool>/v<version> (e.g. ngiab-calibrate/v0.3.0): the tag is the
+# version. A published version is never replaced: a changed image needs a new tag. The job summary
+# gives the image's digest, which the lego registry (hydrowf-platform registry/legos.yaml) pins.
+# Pull requests build and scan the tools they change.
+#
+# The first publish of a tool creates a PRIVATE package: make it public once in GitHub -> Packages ->
+# <tool> -> Package settings -> Change visibility, so clusters can pull it without credentials.
+
+on:
+  pull_request:
+  push:
+    tags: ["*/v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0                 # the pull request's base, to see which tools changed
+      - id: plan
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: echo "matrix=$(.github/scripts/image-plan.sh "$GITHUB_EVENT_NAME" "$GITHUB_REF_NAME" "$BASE")" >> "$GITHUB_OUTPUT"
+
+  image:
+    needs: plan
+    if: needs.plan.outputs.matrix != '{"include":[]}'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      IMAGE: ghcr.io/aquaveo/${{ matrix.tool }}
+      VERSION: ${{ matrix.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space          # ngiab-calibrate is 5.5 GB, on a runner with ~14 GB free
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: nextgen/${{ matrix.tool }}
+          platforms: linux/amd64
+          load: true                     # into the runner's Docker: scanned, then pushed as is
+          tags: ${{ env.IMAGE }}:${{ env.VERSION }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+
+      - name: Scan with Grype (report only)
+        uses: anchore/scan-action@v7
+        with:
+          image: ${{ env.IMAGE }}:${{ env.VERSION }}
+          severity-cutoff: high
+          only-fixed: true
+          fail-build: false              # upstream bases (NGIAB, amazonlinux) carry findings we can't fix
+          output-format: table
+
+      - name: Log in to GHCR
+        if: matrix.push
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Refuse to replace a published version
+        if: matrix.push
+        run: |
+          if docker buildx imagetools inspect "$IMAGE:$VERSION" > /dev/null 2>&1; then
+            echo "::error::$IMAGE:$VERSION is already published; release a new version instead"
+            exit 1
+          fi
+
+      - name: Push the scanned image
+        if: matrix.push
+        run: |
+          docker push "$IMAGE:$VERSION"
+          digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$VERSION")
+          echo "Published \`$digest\` (pin legos to this digest)" >> "$GITHUB_STEP_SUMMARY"
