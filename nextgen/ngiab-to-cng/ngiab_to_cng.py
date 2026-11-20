@@ -26,12 +26,13 @@ import pyarrow.parquet as pq
 import pyogrio
 import rioxarray  # noqa: F401  (registers the .rio accessor)
 import xarray as xr
-from pyproj import CRS
+from pyproj import CRS, Transformer
 from zarr.codecs import ZstdCodec
 
 import icefabric_hydrofabric as hf
 
-TOOL_VERSION = "0.1.0"
+TOOL_VERSION = "0.2.0"
+MANIFEST_VERSION = "0.2"   # 0.2: bbox (WGS84) and start/end_datetime, for the job's STAC Item
 PARQUET_OPTS = {"compression": "zstd", "compression_level": 6}
 # Time series Zarr chunks: at most this many locations, and about this many values (1 MiB of float32)
 ZARR_CHUNK_LOCATIONS = 512
@@ -251,8 +252,24 @@ def geo_metadata(gdf: gpd.GeoDataFrame) -> dict:
     }
 
 
-def write_hydrofabric(gpkg: Path, out_dir: Path) -> tuple[list[dict], list[dict]]:
-    outputs, skipped = [], []
+def wgs84_bounds(geo: dict) -> list[float]:
+    """A GeoParquet bbox in its column's CRS as [west, south, east, north] in WGS84 degrees. The edges
+    are densified, so a projected box's curved sides stay inside the result."""
+    column = geo["columns"]["geometry"]
+    to_wgs84 = Transformer.from_crs(CRS.from_json_dict(column["crs"]), "EPSG:4326", always_xy=True)
+    return list(to_wgs84.transform_bounds(*column["bbox"], densify_pts=21))
+
+
+def union_bounds(boxes: list[list[float]]) -> list[float] | None:
+    if not boxes:
+        return None
+    return [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
+
+
+def write_hydrofabric(gpkg: Path, out_dir: Path) -> tuple[list[dict], list[dict], list[float] | None]:
+    """The gpkg's layers as (Geo)Parquet: their outputs, the layers skipped, and the WGS84 bounds of
+    every layer with geometry (None when none has a CRS)."""
+    outputs, skipped, boxes = [], [], []
     present = {name for name, _ in pyogrio.list_layers(gpkg)}
     out_dir.mkdir(parents=True, exist_ok=True)
     for layer, schema in HYDROFABRIC_LAYERS.items():
@@ -268,6 +285,8 @@ def write_hydrofabric(gpkg: Path, out_dir: Path) -> tuple[list[dict], list[dict]
         geo = None
         if "geometry" in columns:
             geo = geo_metadata(df)
+            if geo["columns"]["geometry"]["crs"] and len(df):
+                boxes.append(wgs84_bounds(geo))
             wkb = df.geometry.to_wkb().values
             df = pd.DataFrame(df.drop(columns="geometry"))
             df["geometry"] = wkb
@@ -281,7 +300,7 @@ def write_hydrofabric(gpkg: Path, out_dir: Path) -> tuple[list[dict], list[dict]
             "schema": f"icefabric.hydrofabric_v2.2.{schema.__name__}@9bcff38", "rows": table.num_rows,
             "filled_with_nulls": missing, "dropped_columns": dropped,
         })
-    return outputs, skipped
+    return outputs, skipped, union_bounds(boxes)
 
 
 def write_gridded(raw_nc: Path, out_dir: Path) -> list[dict]:
@@ -334,6 +353,17 @@ def write_gridded(raw_nc: Path, out_dir: Path) -> list[dict]:
     return outputs
 
 
+def period(outputs: list[dict]) -> tuple[str, str] | None:
+    """The first and last value_time over every time series written, in UTC (TEEHR's times have no
+    zone and are UTC)."""
+    spans = [o["value_time"] for o in outputs if o.get("value_time")]
+    if not spans:
+        return None
+    first, last = min(pd.Timestamp(s[0]) for s in spans), max(pd.Timestamp(s[1]) for s in spans)
+    return tuple(t.tz_localize("UTC").isoformat() if t.tzinfo is None else t.tz_convert("UTC").isoformat()
+                 for t in (first, last))
+
+
 def read_run_metadata(path: Path) -> dict:
     if not path.exists():
         return {}
@@ -369,7 +399,7 @@ def main() -> None:
         outputs.append(write_timeseries(rows, ts / f"{name}.parquet", schema, config))
         if source:
             outputs.append(write_timeseries_zarr(rows, ts / f"{name}.zarr", source))
-    hf_outputs, not_converted = write_hydrofabric(gpkgs[0], out / "hydrofabric")
+    hf_outputs, not_converted, bbox = write_hydrofabric(gpkgs[0], out / "hydrofabric")
     outputs += hf_outputs
     raw_nc = run / "forcings/raw_gridded_data.nc"
     if raw_nc.exists():
@@ -382,12 +412,15 @@ def main() -> None:
     for o in outputs:
         o["path"] = str(Path(o["path"]).relative_to(out))
     inputs = [run / "config/realization.json", run / "config/troute.yaml", gpkgs[0], run / "forcings/forcings.nc"]
+    span = period(outputs)
     manifest = {
-        "manifest_version": "0.1",
+        "manifest_version": MANIFEST_VERSION,
         "tool": {"name": "ngiab-to-cng", "version": TOOL_VERSION},
         "run_id": args.run_id or run.resolve().name,
         "configuration_name": args.configuration_name,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        **({"bbox": bbox} if bbox else {}),
+        **({"start_datetime": span[0], "end_datetime": span[1]} if span else {}),
         "run_metadata": read_run_metadata(run / "outputs/run_metadata.txt"),
         "inputs": [{"path": str(f.relative_to(run)), "sha256": sha256(f)} for f in inputs if f.exists()],
         "outputs": outputs,
