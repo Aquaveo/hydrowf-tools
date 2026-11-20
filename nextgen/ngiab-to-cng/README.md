@@ -13,7 +13,8 @@ named after the run folder so two conversions in one pipeline don't collide:
 | `hydrofabric/<layer>.parquet` | GeoParquet / Parquet | Every layer of the subset gpkg |
 | `gridded/forcings.zarr` | Zarr v3, zstd | `forcings/raw_gridded_data.nc`, CF `grid_mapping` with NWM's LCC on a 6,370,000 m sphere; chunks up to 256 x 256 cells and about 1 MiB |
 | `gridded/cog/<variable>_mean.tif`, `precip_rate_total.tif` | COG, zstd | One band each: every forcing variable's mean over the run, and the precipitation total in mm (from `precip_rate` in `mm s^-1` x the time step). A cell with a missing hour is NaN. The hourly grids are in `forcings.zarr`. |
-| `manifest.json` | JSON | Manifest 0.2: `run_metadata.txt`, SHA-256 of the inputs, each output with per-variable count/min/max, what was not converted, the hydrofabric's `bbox` in WGS84 degrees and the time series' `start_datetime`/`end_datetime` (UTC). hydrowf-ogc builds the job's STAC Item from it. |
+| `run/` | as is | What a rerun needs, copied byte for byte: `config/` (realization, `troute.yaml`, the gpkg, `cat_config/`), `forcings/forcings.nc` and `partitions_*.json`. `cng-to-ngen` turns it back into a run folder. A run folder with a symlink, FIFO or other special file under `config/` or `forcings/` is refused before anything is converted (those files would be copied or read as they are); a run that converts but can't be rebuilt (e.g. a file name outside `A-Z a-z 0-9 . _ -`) gets no `run/`, and `not_converted` says why. The gpkg and forcings are also in the cloud-native files above, but those conversions don't keep every column and attribute ngen reads. |
+| `manifest.json` | JSON | Manifest 0.3: `run_metadata.txt`, SHA-256 of the inputs, each output with per-variable count/min/max, what was not converted, the hydrofabric's `bbox` in WGS84 degrees and the time series' `start_datetime`/`end_datetime` (UTC), and `rerun` (the files under `run/` with their SHA-256). hydrowf-ogc builds the job's STAC Item from it. |
 
 - Time series use TEEHR's secondary timeseries schema, taken from the teehr library at image build:
   the first Docker stage installs `teehr==${TEEHR_VERSION}` (default 0.8.0) and `export_teehr_schema.py`
@@ -30,7 +31,7 @@ named after the run folder so two conversions in one pipeline don't collide:
   NGWPC/icefabric at commit 9bcff38 (BSD-2-Clause, `LICENSE.icefabric`). Columns the community gpkg lacks
   (`divide-attributes.glacier_percent`) are null; `hydrolocations` has no geometry in that schema.
 - SUMMA's `outputs/summa/` is listed in the manifest as not converted.
-- Image: local `hydrowf/ngiab-to-cng:0.2.0` built from `Dockerfile`; dependencies pinned in `requirements.txt`
+- Image: local `hydrowf/ngiab-to-cng:0.3.0` built from `Dockerfile`; dependencies pinned in `requirements.txt`
   (from `requirements.in` with `uv pip compile`).
 
 TODO: measure RAM on a large run; publish the image.
