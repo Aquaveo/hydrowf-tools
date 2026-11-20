@@ -13,7 +13,10 @@ doc: |
     (geometry as WKB, with GeoParquet metadata)
   - gridded/forcings.zarr: forcings/raw_gridded_data.nc; gridded/cog/: one-band COGs with each
     variable's mean over the run and the precipitation total
-  - manifest.json: run metadata, input hashes, outputs and what was not converted
+  - run/: what a rerun needs, copied as is (config/, forcings/forcings.nc, partitions_*.json);
+    cng-to-ngen turns it back into a run folder
+  - manifest.json: run metadata, input hashes, outputs, what was not converted, and `rerun`
+    (the files under run/ with their SHA-256)
 
 $namespaces:
   hydrowf: https://github.com/Aquaveo/hydrowf-tools/tree/main/hints#
@@ -21,7 +24,7 @@ $namespaces:
 requirements:
   DockerRequirement:
     # Local image built from Dockerfile in this folder
-    dockerPull: hydrowf/ngiab-to-cng:0.2.0
+    dockerPull: hydrowf/ngiab-to-cng:0.3.0
     dockerOutputDirectory: /cwl-output   # fixed path, so --cachedir keys repeat (cwltool otherwise picks a random one per run)
   ResourceRequirement:
     coresMin: 1

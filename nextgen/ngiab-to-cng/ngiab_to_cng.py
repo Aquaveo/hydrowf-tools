@@ -3,6 +3,7 @@
 
 Output layout (under --output):
   manifest.json
+  run/{config/**,forcings/forcings.nc,partitions_*.json}     what a rerun needs, copied as is (cng-to-ngen)
   timeseries/{catchment,nexus,troute,forcings}.parquet   TEEHR 0.8 secondary timeseries schema
   timeseries/{catchment,troute,forcings}.zarr            the same values as (location_id, time) arrays, Zarr v3
   hydrofabric/<layer>.parquet                            icefabric v2.2 schemas, WKB + GeoParquet metadata
@@ -16,6 +17,8 @@ import argparse
 import hashlib
 import json
 import os
+import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,8 +34,10 @@ from zarr.codecs import ZstdCodec
 
 import icefabric_hydrofabric as hf
 
-TOOL_VERSION = "0.2.0"
-MANIFEST_VERSION = "0.2"   # 0.2: bbox (WGS84) and start/end_datetime, for the job's STAC Item
+TOOL_VERSION = "0.3.0"
+# 0.2: bbox (WGS84) and start/end_datetime, for the job's STAC Item. 0.3: `rerun`, the run inputs copied as is
+MANIFEST_VERSION = "0.3"
+RERUN_DIR = "run"
 PARQUET_OPTS = {"compression": "zstd", "compression_level": 6}
 # Time series Zarr chunks: at most this many locations, and about this many values (1 MiB of float32)
 ZARR_CHUNK_LOCATIONS = 512
@@ -364,6 +369,70 @@ def period(outputs: list[dict]) -> tuple[str, str] | None:
                  for t in (first, last))
 
 
+# A rerun file's path, as cng-to-ngen accepts it: relative, plain characters, no empty part (no `.`/`..`
+# below: they are refused separately)
+SAFE_PATH = re.compile(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*")
+
+
+class NotRerunnable(Exception):
+    """The run folder can be converted, but not kept for a rerun (the reason goes to not_converted)."""
+
+
+def walk_files(top: Path, run: Path) -> list[Path]:
+    """Every regular file under `top`, refusing any symlink (file or folder) and anything that resolves
+    outside the run folder: these files are copied into the job's output as they are."""
+    if top.is_symlink():
+        raise SystemExit(f"{top.relative_to(run)} is a symlink: the run folder must hold real files")
+    found = []
+    for folder, dirs, files in os.walk(top, followlinks=False):
+        for name in dirs + files:
+            path = Path(folder) / name
+            if path.is_symlink():
+                raise SystemExit(f"{path.relative_to(run)} is a symlink: the run folder must hold real files")
+        for name in files:
+            path = Path(folder) / name
+            if not path.is_file():                 # a FIFO, socket or device: nothing to copy
+                raise SystemExit(f"{path.relative_to(run)} is not a regular file")
+            found.append(path)
+    return found
+
+
+def rerun_files(run: Path) -> list[Path]:
+    """What ngen and t-route read to run again, relative to the run folder: every file under config/
+    (realization, troute.yaml, the gpkg, cat_config/), forcings/forcings.nc and the MPI partitions.
+    The outputs and the gridded forcings (already converted, and read by no model) are left out.
+    SystemExit on a symlink; NotRerunnable when cng-to-ngen couldn't rebuild a runnable folder from them."""
+    files = walk_files(run / "config", run) if (run / "config").is_dir() else []
+    forcings = run / "forcings/forcings.nc"
+    if not forcings.is_file():
+        raise NotRerunnable("no forcings/forcings.nc")
+    walk_files(run / "forcings", run)            # no symlink in forcings/; only forcings.nc is kept
+    files.append(forcings)
+    files += sorted(f for f in run.glob("partitions_*.json") if f.is_file())
+    root = run.resolve()
+    for f in files:
+        if f.is_symlink() or not f.resolve().is_relative_to(root):
+            raise SystemExit(f"{f.relative_to(run)} is a symlink or outside the run folder")
+    rels = sorted(f.relative_to(run) for f in files)
+    if not any(r.parent == Path("config") and "realization" in r.name and r.suffix == ".json" for r in rels):
+        raise NotRerunnable("no config/*realization*.json")
+    odd = [str(r) for r in rels if not SAFE_PATH.fullmatch(str(r))]
+    if odd:
+        raise NotRerunnable(f"file names cng-to-ngen won't take (A-Z a-z 0-9 . _ - only): {odd[:3]}")
+    return rels
+
+
+def copy_rerun(run: Path, out: Path, files: list[Path]) -> dict:
+    """Copy `files` (rerun_files' answer) to out/run/, byte for byte, and describe them for the manifest."""
+    copied = []
+    for rel in files:
+        target = out / RERUN_DIR / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(run / rel, target)
+        copied.append({"path": str(rel), "sha256": sha256(target), "bytes": target.stat().st_size})
+    return {"dir": RERUN_DIR, "files": copied}
+
+
 def read_run_metadata(path: Path) -> dict:
     if not path.exists():
         return {}
@@ -380,6 +449,11 @@ def main() -> None:
     args = p.parse_args()
 
     run, out = args.run_dir, args.output
+    # What a rerun keeps is decided first: a symlink or special file stops the job before minutes of conversion
+    try:
+        keep, not_kept = rerun_files(run), None
+    except NotRerunnable as err:
+        keep, not_kept = None, str(err)
     out.mkdir(parents=True, exist_ok=True)
     gpkgs = sorted((run / "config").glob("*.gpkg"))
     if len(gpkgs) != 1:
@@ -413,6 +487,9 @@ def main() -> None:
         o["path"] = str(Path(o["path"]).relative_to(out))
     inputs = [run / "config/realization.json", run / "config/troute.yaml", gpkgs[0], run / "forcings/forcings.nc"]
     span = period(outputs)
+    rerun = copy_rerun(run, out, keep) if keep is not None else None
+    if not_kept:                                # converted all the same; cng-to-ngen will say why it can't
+        not_converted.append({"path": RERUN_DIR, "reason": f"not kept for a rerun: {not_kept}"})
     manifest = {
         "manifest_version": MANIFEST_VERSION,
         "tool": {"name": "ngiab-to-cng", "version": TOOL_VERSION},
@@ -425,6 +502,7 @@ def main() -> None:
         "inputs": [{"path": str(f.relative_to(run)), "sha256": sha256(f)} for f in inputs if f.exists()],
         "outputs": outputs,
         "not_converted": not_converted,
+        **({"rerun": rerun} if rerun else {}),
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(json.dumps({"outputs": len(outputs), "not_converted": len(not_converted)}))
