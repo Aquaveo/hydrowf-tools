@@ -1,0 +1,3 @@
+timeseries:
+  class: Directory
+  path: ts               # an ngiab-to-cng --format teehr-timeseries output; tests/evaluate.sh makes one

@@ -1,0 +1,4 @@
+# uv pip compile requirements.in -o requirements.txt --python-version 3.12
+teehr==0.8.0
+# pinned: unpinned, the resolver backtracks on teehr's botocore pin to s3fs 0.4.2 (2020)
+s3fs==2026.9.0
