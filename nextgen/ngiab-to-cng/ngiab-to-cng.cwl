@@ -5,7 +5,10 @@ class: CommandLineTool
 id: ngiab-to-cng
 label: NGIAB run to cloud-native files
 doc: |
-  Writes <run>_cng/ (named after the run folder) from an NGIAB run folder:
+  Writes <run>_cng/ (named after the run folder) from an NGIAB run folder. With format
+  teehr-timeseries it writes only what an evaluation reads: timeseries/secondary.parquet (t-route
+  flow at the gaged flowpaths, in TEEHR's schema and names), crosswalk.parquet (to usgs-<site>) and
+  manifest.json. With ngen-cng (the default):
   - timeseries/*.parquet: catchment, nexus, t-route and forcing time series in the
     TEEHR 0.8 secondary timeseries schema; timeseries/*.zarr: the same values as
     (location_id, time) arrays
@@ -24,7 +27,7 @@ $namespaces:
 requirements:
   DockerRequirement:
     # Local image built from Dockerfile in this folder
-    dockerPull: hydrowf/ngiab-to-cng:0.3.0
+    dockerPull: hydrowf/ngiab-to-cng:0.4.0
     dockerOutputDirectory: /cwl-output   # fixed path, so --cachedir keys repeat (cwltool otherwise picks a random one per run)
   ResourceRequirement:
     coresMin: 1
@@ -52,6 +55,14 @@ inputs:
     default: ngiab
     label: TEEHR configuration name
     inputBinding: {prefix: --configuration-name}
+  format:
+    type:
+      type: enum
+      symbols: [ngen-cng, teehr-timeseries]
+    default: ngen-cng
+    label: Output format
+    doc: ngen-cng (every table, the hydrofabric, gridded forcings, run/) or teehr-timeseries (flow at gaged flowpaths, with a crosswalk to USGS gages).
+    inputBinding: {prefix: --format}
 
 outputs:
   cng:

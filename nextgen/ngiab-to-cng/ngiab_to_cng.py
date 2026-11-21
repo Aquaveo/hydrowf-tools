@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Convert a finished NGIAB run folder into cloud-native files.
 
-Output layout (under --output):
+Output layout (under --output), --format ngen-cng (the default):
   manifest.json
   run/{config/**,forcings/forcings.nc,partitions_*.json}     what a rerun needs, copied as is (cng-to-ngen)
   timeseries/{catchment,nexus,troute,forcings}.parquet   TEEHR 0.8 secondary timeseries schema
@@ -10,6 +10,12 @@ Output layout (under --output):
   gridded/forcings.zarr                                  forcings/raw_gridded_data.nc as Zarr v3
   gridded/cog/<variable>_<mean|total>.tif                one-band COGs: each variable's mean over the run,
                                                          and the precipitation total (mm)
+
+--format teehr-timeseries (what an evaluation reads; any model's tool can write it):
+  manifest.json                    format, bbox and period of the gaged flowpaths, and `teehr` (schema and names)
+  timeseries/secondary.parquet     t-route flow at the gaged flowpaths, as TEEHR names it: ngen-<n>,
+                                   streamflow_hourly_inst, m^3/s
+  crosswalk.parquet                secondary_location_id (ngen-<n>) -> primary_location_id (usgs-<site>)
 """
 from __future__ import annotations
 
@@ -34,23 +40,33 @@ from zarr.codecs import ZstdCodec
 
 import icefabric_hydrofabric as hf
 
-TOOL_VERSION = "0.3.0"
-# 0.2: bbox (WGS84) and start/end_datetime, for the job's STAC Item. 0.3: `rerun`, the run inputs copied as is
-MANIFEST_VERSION = "0.3"
+TOOL_VERSION = "0.4.0"
+FORMATS = ("ngen-cng", "teehr-timeseries")      # the data legos --format writes; the first is the default
+# 0.2: bbox (WGS84) and start/end_datetime, for the job's STAC Item. 0.3: `rerun`, the run inputs copied as is.
+# 0.4 (tool 0.4.0): `format`, the data lego written; teehr-timeseries adds `teehr`
+MANIFEST_VERSION = "0.4"
 RERUN_DIR = "run"
 PARQUET_OPTS = {"compression": "zstd", "compression_level": 6}
 # Time series Zarr chunks: at most this many locations, and about this many values (1 MiB of float32)
 ZARR_CHUNK_LOCATIONS = 512
 ZARR_CHUNK_VALUES = 262_144
 
-# TEEHR's secondary timeseries schema, written by export_teehr_schema.py from the teehr library
-# at image build time (teehr needs pyspark, so it isn't installed in this image).
+# TEEHR's secondary timeseries and location crosswalk schemas, written by export_teehr_schema.py from the
+# teehr library at image build time (teehr needs pyspark, so it isn't installed in this image).
 TEEHR_SCHEMA_FILE = Path(
     os.environ.get("TEEHR_SCHEMA_FILE", Path(__file__).with_name("teehr_secondary_timeseries.arrow"))
+)
+TEEHR_CROSSWALK_SCHEMA_FILE = Path(
+    os.environ.get("TEEHR_CROSSWALK_SCHEMA_FILE", Path(__file__).with_name("teehr_location_crosswalks.arrow"))
 )
 
 # ngen nexus flow: src/core/nexus/HY_PointHydroNexus.cpp:228 returns "m3/s"
 NEXUS_UNIT = "m3 s-1"
+
+# teehr-timeseries: TEEHR's own names (teehr 0.8.0's default variables and units tables)
+TEEHR_VARIABLE = "streamflow_hourly_inst"
+TEEHR_UNITS = {"m3 s-1": "m^3/s", "m3/s": "m^3/s", "m^3/s": "m^3/s"}   # t-route's units attribute -> TEEHR's
+NGEN_PREFIX, USGS_PREFIX = "ngen-", "usgs-"     # TEEHR location ids, as CIROH's ngiab-teehr names them
 
 # gpkg layer -> icefabric v2.2 schema class (same list as icefabric tools/hydrofabric/hf2.2_gpkg_to_parquet.py)
 HYDROFABRIC_LAYERS = {
@@ -75,11 +91,30 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def load_teehr_schema() -> pa.Schema:
-    if not TEEHR_SCHEMA_FILE.exists():
-        raise SystemExit(f"{TEEHR_SCHEMA_FILE} not found: create it with export_teehr_schema.py")
-    with pa.OSFile(str(TEEHR_SCHEMA_FILE)) as f:
+def load_teehr_schema(path: Path = TEEHR_SCHEMA_FILE) -> pa.Schema:
+    if not path.exists():
+        raise SystemExit(f"{path} not found: create it with export_teehr_schema.py")
+    with pa.OSFile(str(path)) as f:
         return pa.ipc.read_schema(f)
+
+
+def teehr_version(schema: pa.Schema) -> str:
+    """The teehr version export_teehr_schema.py took the schema from."""
+    return (schema.metadata or {}).get(b"teehr_version", b"unknown").decode()
+
+
+def teehr_table(df: pd.DataFrame, schema: pa.Schema) -> pa.Table:
+    """`df` as a table of TEEHR's `schema`, typed even when empty. Columns `df` lacks are null; a column
+    TEEHR requires that `df` lacks (a later teehr version's) stops the tool."""
+    columns = []
+    for field in schema:
+        if field.name in df.columns:
+            columns.append(pa.array(df[field.name].to_numpy(), from_pandas=True).cast(field.type))
+        elif field.nullable:
+            columns.append(pa.nulls(len(df), field.type))
+        else:
+            raise SystemExit(f"TEEHR schema column '{field.name}' is required but this tool doesn't fill it")
+    return pa.Table.from_arrays(columns, schema=schema.remove_metadata())
 
 
 def write_timeseries(df: pd.DataFrame, path: Path, schema: pa.Schema, configuration_name: str) -> dict:
@@ -91,22 +126,12 @@ def write_timeseries(df: pd.DataFrame, path: Path, schema: pa.Schema, configurat
     df = df.dropna(subset=["value"]).sort_values(["location_id", "variable_name", "value_time"])
     df = df.assign(configuration_name=configuration_name)
     n = len(df)
-    columns = []
-    for field in schema:
-        if field.name in df.columns:
-            columns.append(pa.array(df[field.name].to_numpy(), from_pandas=True).cast(field.type))
-        elif field.nullable:
-            columns.append(pa.nulls(n, field.type))
-        else:
-            raise SystemExit(f"TEEHR schema column '{field.name}' is required but this tool doesn't fill it")
-    table = pa.Table.from_arrays(columns, schema=schema.remove_metadata())
     path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(table, path, **PARQUET_OPTS)
+    pq.write_table(teehr_table(df, schema), path, **PARQUET_OPTS)
     # Per-variable stats so a bad model value (e.g. a t-route depth of 1e35) shows up in the manifest
     stats = df.groupby("variable_name")["value"].agg(["count", "min", "max"])
-    teehr_version = (schema.metadata or {}).get(b"teehr_version", b"unknown").decode()
     return {
-        "path": str(path), "format": "parquet", "schema": f"teehr.secondary_timeseries@{teehr_version}",
+        "path": str(path), "format": "parquet", "schema": f"teehr.secondary_timeseries@{teehr_version(schema)}",
         "rows": n, "locations": int(df["location_id"].nunique()),
         "value_time": [str(df["value_time"].min()), str(df["value_time"].max())] if n else None,
         "variables": {v: {"count": int(r["count"]), "min": float(r["min"]), "max": float(r["max"])}
@@ -440,14 +465,162 @@ def read_run_metadata(path: Path) -> dict:
     return {k.strip(): v.strip() for k, v in pairs}
 
 
+def gage_candidates(gpkg: Path) -> pd.DataFrame:
+    """Every flowpath (wb-<n>) whose flowpath-attributes.gage is set: secondary_location_id (ngen-<n>),
+    primary_location_id (usgs-<site>) and into_gage (it flows into the gage's nexus: toid == gage_nex_id).
+    Where a hydrofabric lists several gages on a flowpath, the first (as ngiab-teehr)."""
+    layer = "flowpath-attributes"
+    if layer not in {name for name, _ in pyogrio.list_layers(gpkg)}:
+        raise SystemExit(f"{gpkg.name} has no {layer} layer, where teehr-timeseries finds the gages")
+    fields = set(pyogrio.read_info(gpkg, layer=layer)["fields"])
+    if not {"id", "gage"} <= fields:
+        raise SystemExit(f"{gpkg.name}:{layer} has no id or gage column, where teehr-timeseries finds the gages")
+    attrs = pyogrio.read_dataframe(gpkg, layer=layer, read_geometry=False,
+                                   columns=[c for c in ("id", "gage", "toid", "gage_nex_id") if c in fields])
+    site = attrs["gage"].map(lambda g: str(g).split(",")[0].strip() if pd.notna(g) else "")
+    into = (attrs["toid"] == attrs["gage_nex_id"]) if {"toid", "gage_nex_id"} <= fields else False
+    ids = attrs["id"].astype(str)
+    keep = (site != "") & ids.str.fullmatch(r"wb-\d+")          # v2.2 flowpath ids; t-route's feature_id is <n>
+    return pd.DataFrame({"primary_location_id": USGS_PREFIX + site, "into_gage": into,
+                         "secondary_location_id": NGEN_PREFIX + ids.str.removeprefix("wb-")})[keep]
+
+
+def one_per_gage(candidates: pd.DataFrame, with_flow: set[str], gpkg: Path) -> tuple[pd.DataFrame, list[dict]]:
+    """The crosswalk: for each gage, one of its candidates that t-route wrote flow for (the one flowing into
+    the gage, else the first by id), since two simulated series under one gage would be pooled into its
+    metrics. And the candidates left out, for not_converted."""
+    c = candidates[candidates["secondary_location_id"].isin(with_flow)]
+    c = c.sort_values(["primary_location_id", "into_gage", "secondary_location_id"], ascending=[True, False, True])
+    kept, dropped = c.drop_duplicates("primary_location_id"), c[c.duplicated("primary_location_id")]
+    chosen = dict(zip(kept["primary_location_id"], kept["secondary_location_id"]))
+    notes = [{"path": f"{gpkg.name}:flowpath-attributes:wb-{loc.removeprefix(NGEN_PREFIX)}",
+              "reason": f"gage {gage.removeprefix(USGS_PREFIX)} is also on {chosen[gage]}, "
+                        "which teehr-timeseries keeps"}
+             for loc, gage in zip(dropped["secondary_location_id"], dropped["primary_location_id"])]
+    xwalk = kept[["primary_location_id", "secondary_location_id"]].reset_index(drop=True)
+    return xwalk, notes
+
+
+def troute_flow(troute_dir: Path, flowpaths: list[str]) -> tuple[pd.DataFrame, list]:
+    """t-route's routed `flow` at these flowpaths (wb-<n>) as long rows with ngen-<n> ids, missing values
+    dropped, and t-route's time axis (every file's `time`, whatever is missing). Only the gaged features are
+    read. Refuses a run without t-route output, or without a (feature_id, time) `flow` variable."""
+    files = sorted(troute_dir.glob("*.nc"))
+    if not files:
+        raise SystemExit(f"no t-route output ({troute_dir.name}/*.nc): teehr-timeseries is t-route's routed flow")
+    wanted = [int(f.removeprefix("wb-")) for f in flowpaths]
+    frames, times = [], set()
+    for nc in files:
+        with xr.open_dataset(nc) as ds:
+            if "flow" not in ds.data_vars:
+                continue
+            if ds["flow"].dims != ("feature_id", "time"):
+                raise SystemExit(f"t-route flow in {nc.name} has dims {ds['flow'].dims}, not (feature_id, time)")
+            times.update(ds["time"].values.tolist())
+            da = ds["flow"].sel(feature_id=ds["feature_id"].isin(wanted))
+            df = da.to_dataframe(name="value").reset_index()[["feature_id", "time", "value"]]
+            frames.append(df.assign(location_id=NGEN_PREFIX + df["feature_id"].astype(str),
+                                    unit_name=da.attrs.get("units", "unknown")))
+    if not frames:
+        raise SystemExit(f"t-route output in {troute_dir.name}/ has no `flow` variable")
+    df = pd.concat(frames, ignore_index=True).rename(columns={"time": "value_time"}).drop(columns="feature_id")
+    return df.dropna(subset=["value"]), sorted(pd.to_datetime(list(times)))
+
+
+def teehr_flow(flow: pd.DataFrame, times: list) -> pd.DataFrame:
+    """`flow` with TEEHR's variable and unit names. Refuses a unit TEEHR_UNITS doesn't map, and a t-route time
+    axis (`times`, not the rows left after missing values) with a step other than one hour (the variable says
+    hourly)."""
+    for unit in flow["unit_name"].unique():
+        if unit not in TEEHR_UNITS:
+            raise SystemExit(f"t-route flow is in unit '{unit}', which ngiab-to-cng doesn't map to a TEEHR unit")
+    steps = pd.Series(times).diff().dropna().unique()
+    if len(steps) and list(steps) != [pd.Timedelta(hours=1)]:
+        raise SystemExit(f"t-route flow is not hourly (steps {sorted(set(map(str, steps)))}), and TEEHR's "
+                         f"{TEEHR_VARIABLE} is")
+    return flow.assign(variable_name=TEEHR_VARIABLE, unit_name=flow["unit_name"].map(TEEHR_UNITS))
+
+
+def gage_bbox(gpkg: Path, flowpaths: list[str]) -> list[float] | None:
+    """The WGS84 bounds of these flowpaths (wb-<n>), or None when there are none, the gpkg has no flowpaths
+    layer, or the layer has no CRS."""
+    if not flowpaths or "flowpaths" not in {name for name, _ in pyogrio.list_layers(gpkg)}:
+        return None
+    fps = gpd.read_file(gpkg, layer="flowpaths", columns=["id"])
+    fps = fps[fps["id"].isin(flowpaths)]
+    if fps.empty or fps.crs is None:
+        return None
+    return [float(v) for v in fps.to_crs("EPSG:4326").total_bounds]
+
+
+def manifest_head(args: argparse.Namespace, fmt: str, bbox: list[float] | None, span: tuple | None) -> dict:
+    """The manifest fields both formats start with."""
+    return {
+        "manifest_version": MANIFEST_VERSION,
+        "tool": {"name": "ngiab-to-cng", "version": TOOL_VERSION},
+        "format": fmt,
+        "run_id": args.run_id or args.run_dir.resolve().name,
+        "configuration_name": args.configuration_name,
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        **({"bbox": bbox} if bbox else {}),
+        **({"start_datetime": span[0], "end_datetime": span[1]} if span else {}),
+    }
+
+
+def write_teehr(args: argparse.Namespace, gpkg: Path) -> dict:
+    """--format teehr-timeseries: the gaged flowpaths' flow and their crosswalk. Returns the manifest."""
+    run, out = args.run_dir, args.output
+    schema, xw_schema = load_teehr_schema(), load_teehr_schema(TEEHR_CROSSWALK_SCHEMA_FILE)
+    candidates = gage_candidates(gpkg)
+    flowpaths = ["wb-" + loc.removeprefix(NGEN_PREFIX) for loc in candidates["secondary_location_id"]]
+    flow, times = troute_flow(run / "outputs/troute", flowpaths)
+    # only what can be evaluated: one flowpath per gage, among those with flow
+    xwalk, not_converted = one_per_gage(candidates, set(flow["location_id"]), gpkg)
+    flow = teehr_flow(flow[flow["location_id"].isin(xwalk["secondary_location_id"])], times)
+    out.mkdir(parents=True, exist_ok=True)
+    outputs = [write_timeseries(flow, out / "timeseries/secondary.parquet", schema, args.configuration_name)]
+    pq.write_table(teehr_table(xwalk, xw_schema), out / "crosswalk.parquet", **PARQUET_OPTS)
+    outputs.append({"path": str(out / "crosswalk.parquet"), "format": "parquet", "rows": len(xwalk),
+                    "schema": f"teehr.location_crosswalks@{teehr_version(xw_schema)}"})
+    for o in outputs:
+        o["path"] = str(Path(o["path"]).relative_to(out))
+    if not len(xwalk):
+        not_converted.append({"path": f"{gpkg.name}:flowpath-attributes",
+                              "reason": "no flowpath with a gage that t-route wrote flow for"})
+    kept = ["wb-" + s.removeprefix(NGEN_PREFIX) for s in xwalk["secondary_location_id"]]
+    return {
+        **manifest_head(args, "teehr-timeseries", gage_bbox(gpkg, kept), period(outputs)),
+        "teehr": {"schema": outputs[0]["schema"], "crosswalk_schema": outputs[1]["schema"],
+                  "configuration_name": args.configuration_name,
+                  "variable_name": TEEHR_VARIABLE, "unit_name": TEEHR_UNITS["m3 s-1"]},
+        "inputs": [{"path": str(f.relative_to(run)), "sha256": sha256(f)}
+                   for f in (gpkg, *sorted((run / "outputs/troute").glob("*.nc")))],
+        "outputs": outputs,
+        "not_converted": not_converted,
+    }
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("run_dir", type=Path, help="NGIAB run folder (config/, forcings/, outputs/)")
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--run-id", default=None, help="Defaults to the run folder name")
     p.add_argument("--configuration-name", default="ngiab")
+    p.add_argument("--format", choices=FORMATS, default=FORMATS[0], help="the data lego to write")
     args = p.parse_args()
 
+    gpkgs = sorted((args.run_dir / "config").glob("*.gpkg"))
+    if len(gpkgs) != 1:
+        raise SystemExit(f"expected one gpkg in {args.run_dir / 'config'}, found {len(gpkgs)}")
+    manifest = write_teehr(args, gpkgs[0]) if args.format == "teehr-timeseries" else write_cng(args, gpkgs[0])
+    (args.output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    print(json.dumps({"format": args.format, "outputs": len(manifest["outputs"]),
+                      "not_converted": len(manifest["not_converted"])}))
+
+
+def write_cng(args: argparse.Namespace, gpkg: Path) -> dict:
+    """--format ngen-cng: every table, the hydrofabric, the gridded forcings and what a rerun needs.
+    Returns the manifest."""
     run, out = args.run_dir, args.output
     # What a rerun keeps is decided first: a symlink or special file stops the job before minutes of conversion
     try:
@@ -455,9 +628,6 @@ def main() -> None:
     except NotRerunnable as err:
         keep, not_kept = None, str(err)
     out.mkdir(parents=True, exist_ok=True)
-    gpkgs = sorted((run / "config").glob("*.gpkg"))
-    if len(gpkgs) != 1:
-        raise SystemExit(f"expected one gpkg in {run / 'config'}, found {len(gpkgs)}")
 
     ts, schema, config = out / "timeseries", load_teehr_schema(), args.configuration_name
     outputs = []
@@ -473,7 +643,7 @@ def main() -> None:
         outputs.append(write_timeseries(rows, ts / f"{name}.parquet", schema, config))
         if source:
             outputs.append(write_timeseries_zarr(rows, ts / f"{name}.zarr", source))
-    hf_outputs, not_converted, bbox = write_hydrofabric(gpkgs[0], out / "hydrofabric")
+    hf_outputs, not_converted, bbox = write_hydrofabric(gpkg, out / "hydrofabric")
     outputs += hf_outputs
     raw_nc = run / "forcings/raw_gridded_data.nc"
     if raw_nc.exists():
@@ -485,27 +655,18 @@ def main() -> None:
 
     for o in outputs:
         o["path"] = str(Path(o["path"]).relative_to(out))
-    inputs = [run / "config/realization.json", run / "config/troute.yaml", gpkgs[0], run / "forcings/forcings.nc"]
-    span = period(outputs)
+    inputs = [run / "config/realization.json", run / "config/troute.yaml", gpkg, run / "forcings/forcings.nc"]
     rerun = copy_rerun(run, out, keep) if keep is not None else None
     if not_kept:                                # converted all the same; cng-to-ngen will say why it can't
         not_converted.append({"path": RERUN_DIR, "reason": f"not kept for a rerun: {not_kept}"})
-    manifest = {
-        "manifest_version": MANIFEST_VERSION,
-        "tool": {"name": "ngiab-to-cng", "version": TOOL_VERSION},
-        "run_id": args.run_id or run.resolve().name,
-        "configuration_name": args.configuration_name,
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        **({"bbox": bbox} if bbox else {}),
-        **({"start_datetime": span[0], "end_datetime": span[1]} if span else {}),
+    return {
+        **manifest_head(args, "ngen-cng", bbox, period(outputs)),
         "run_metadata": read_run_metadata(run / "outputs/run_metadata.txt"),
         "inputs": [{"path": str(f.relative_to(run)), "sha256": sha256(f)} for f in inputs if f.exists()],
         "outputs": outputs,
         "not_converted": not_converted,
         **({"rerun": rerun} if rerun else {}),
     }
-    (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    print(json.dumps({"outputs": len(outputs), "not_converted": len(not_converted)}))
 
 
 if __name__ == "__main__":
