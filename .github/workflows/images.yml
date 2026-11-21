@@ -1,7 +1,7 @@
 name: tool images
 
-# Builds the tool images under nextgen/ (one per Dockerfile), scans them with Grype, and publishes
-# releases to ghcr.io/aquaveo/<tool>:<version>.
+# Builds the tool images under nextgen/, evaluation/ and fim/ (one per Dockerfile; image-plan.sh), scans
+# them with Grype, and publishes releases to ghcr.io/aquaveo/<tool>:<version>.
 #
 # Release a tool by pushing a tag <tool>/v<version> (e.g. ngiab-calibrate/v0.3.0): the tag is the
 # version. A published version is never replaced: a changed image needs a new tag. The job summary
@@ -60,7 +60,7 @@ jobs:
       - name: Build (amd64)
         uses: docker/build-push-action@v6
         with:
-          context: nextgen/${{ matrix.tool }}
+          context: ${{ matrix.dir }}
           platforms: linux/amd64
           load: true                     # into the runner's Docker: scanned, then pushed as is
           tags: ${{ env.IMAGE }}:${{ env.VERSION }}

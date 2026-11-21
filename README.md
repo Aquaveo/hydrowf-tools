@@ -9,6 +9,7 @@ and the pipelines built from them.
 |---|---|
 | `nextgen/<tool>/` | `<tool>.cwl`, `tests/job.yml`, `README.md` |
 | `fim/<tool>/` | same, for FIM tools |
+| `evaluation/<tool>/` | same, for model-agnostic evaluation tools (e.g. `teehr-evaluate`) |
 | `pipelines/` | CWL Workflows that chain tools |
 | `hints/` | the `hydrowf:` hint vocabulary and the supported CWL subset |
 
