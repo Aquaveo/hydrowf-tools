@@ -12,12 +12,12 @@
 #
 #   evaluation/teehr-evaluate/tests/evaluate.sh      (from the repository root; needs Docker and the internet)
 #
-# Images: hydrowf/teehr-evaluate:0.1.0 (built from this folder), hydrowf/ngiab-to-cng:0.4.0, and RustFS.
+# Images: hydrowf/teehr-evaluate:0.1.1 (built from this folder), hydrowf/ngiab-to-cng:0.4.1, and RustFS.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 TEST_RUN=$ROOT/nextgen/ngiab-run/tests/ngen-run
-EVAL=${EVAL:-hydrowf/teehr-evaluate:0.1.0}
-TO_CNG=${TO_CNG:-hydrowf/ngiab-to-cng:0.4.0}
+EVAL=${EVAL:-hydrowf/teehr-evaluate:0.1.1}
+TO_CNG=${TO_CNG:-hydrowf/ngiab-to-cng:0.4.1}
 RUSTFS=docker.io/rustfs/rustfs:1.0.5@sha256:b81d16a90ee25bd9511280127ca1471788c6e874cf0f0da759645f46b2dc1d74
 ME="$(id -u):$(id -g)"
 NET=teehr-evaluate-test-$$
@@ -60,8 +60,13 @@ t = pq.read_table(p); df = t.to_pandas(); df["value_time"] += pd.Timedelta(days=
 pq.write_table(pa.Table.from_pandas(df, schema=t.schema, preserve_index=False), p)'
 
 echo "== refused, offline, before any download"
-refuses "unknown: knee" /w/ts --metrics kge,knee
-refuses "give distinct names" /w/ts --metrics kge,kge
+refuses "(unknown: 'knee')" /w/ts --metrics kge,knee
+refuses "(unknown: '')" /w/ts --metrics kge,
+docker run --rm --network none --entrypoint python "$EVAL" -I -c '
+import sys; sys.path.insert(0, "/app"); import teehr_evaluate as t
+assert t.parse_metrics("kge,nse,kge,rmsdr,nse") == ["kge", "nse", "rmsdr"]      # repeats dropped, order kept
+assert t.parse_metrics(" kge , nse ") == ["kge", "nse"]                          # spaces around names
+print("   kge,nse,kge,rmsdr,nse -> kge, nse, rmsdr; \" kge , nse \" -> kge, nse")' 2>&1 | grep -v WARN || fail "repeated metrics"
 refuses "invalid choice: 'nwm21'" /w/ts --baseline nwm21
 refuses "format 'ngen-cng', not teehr-timeseries" /w/cng
 edit() {                                # <copy name> <python editing the manifest dict m>
@@ -136,7 +141,7 @@ assert loc.id.tolist() == ["usgs-01031510"] and loc.crs.to_epsg() == 4326, loc
 x, y = loc.geometry.iloc[0].x, loc.geometry.iloc[0].y
 assert abs(x + 69.236) < 0.01 and abs(y - 45.150) < 0.01, (x, y)
 man = json.load(open(f"/w/{out}/manifest.json"))
-assert man["tool"] == {"name": "teehr-evaluate", "version": "0.1.0"} and man["manifest_version"] == "0.2", man
+assert man["tool"] == {"name": "teehr-evaluate", "version": "0.1.1"} and man["manifest_version"] == "0.2", man
 assert (man["start_datetime"], man["end_datetime"]) == ("2020-06-01T01:00:00+00:00", "2020-07-01T00:00:00+00:00")
 assert len(man["bbox"]) == 4 and man["left_out"] == [], man
 assert man["teehr"]["metrics"] == ["kge", "nse", "relative_bias", "rmsdr"], man["teehr"]

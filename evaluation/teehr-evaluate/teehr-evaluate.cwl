@@ -17,7 +17,7 @@ $namespaces:
 requirements:
   DockerRequirement:
     # Local image built from Dockerfile in this folder
-    dockerPull: hydrowf/teehr-evaluate:0.1.0
+    dockerPull: hydrowf/teehr-evaluate:0.1.1
     dockerOutputDirectory: /cwl-output   # fixed path, so --cachedir keys repeat
   NetworkAccess:
     networkAccess: true                  # USGS and NOAA's public bucket

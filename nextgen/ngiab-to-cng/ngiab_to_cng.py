@@ -40,7 +40,7 @@ from zarr.codecs import ZstdCodec
 
 import icefabric_hydrofabric as hf
 
-TOOL_VERSION = "0.4.0"
+TOOL_VERSION = "0.4.1"      # 0.4.1: refuses a configuration name TEEHR uses for its own data
 FORMATS = ("ngen-cng", "teehr-timeseries")      # the data legos --format writes; the first is the default
 # 0.2: bbox (WGS84) and start/end_datetime, for the job's STAC Item. 0.3: `rerun`, the run inputs copied as is.
 # 0.4 (tool 0.4.0): `format`, the data lego written; teehr-timeseries adds `teehr`
@@ -67,6 +67,8 @@ NEXUS_UNIT = "m3 s-1"
 TEEHR_VARIABLE = "streamflow_hourly_inst"
 TEEHR_UNITS = {"m3 s-1": "m^3/s", "m3/s": "m^3/s", "m^3/s": "m^3/s"}   # t-route's units attribute -> TEEHR's
 NGEN_PREFIX, USGS_PREFIX = "ngen-", "usgs-"     # TEEHR location ids, as CIROH's ngiab-teehr names them
+# the configurations TEEHR's own fetches add (teehr-evaluate refuses them): a simulation can't be named so
+TEEHR_RESERVED_CONFIGURATIONS = ("usgs_observations", "nwm30_retrospective")
 
 # gpkg layer -> icefabric v2.2 schema class (same list as icefabric tools/hydrofabric/hf2.2_gpkg_to_parquet.py)
 HYDROFABRIC_LAYERS = {
@@ -608,6 +610,10 @@ def main() -> None:
     p.add_argument("--configuration-name", default="ngiab")
     p.add_argument("--format", choices=FORMATS, default=FORMATS[0], help="the data lego to write")
     args = p.parse_args()
+    if args.configuration_name in TEEHR_RESERVED_CONFIGURATIONS:     # both formats write TEEHR's schema
+        raise SystemExit(f"--configuration-name {args.configuration_name}: the name is TEEHR's own (observations, "
+                         "a baseline); name the simulation something else")      # before converting anything (in a
+        # pipeline that is still after the run: the name is to be checked at submission, in hydrowf-ogc's registry)
 
     gpkgs = sorted((args.run_dir / "config").glob("*.gpkg"))
     if len(gpkgs) != 1:
