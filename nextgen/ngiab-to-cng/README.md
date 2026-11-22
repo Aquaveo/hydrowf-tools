@@ -5,7 +5,7 @@ named after the run folder so two conversions in one pipeline don't collide, in 
 (`--format`, a data lego each):
 
 - `ngen-cng` (the default): everything below.
-- `teehr-timeseries`: what an evaluation reads (hydrowf-core `docs/design/teehr-evaluation.md`), see
+- `teehr-timeseries`: what an evaluation reads ([design](../../docs/design/teehr-evaluation.md)), see
   [teehr-timeseries](#teehr-timeseries).
 
 ### ngen-cng

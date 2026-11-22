@@ -2,7 +2,7 @@
 
 Evaluates a simulation against USGS observations with [TEEHR](https://github.com/RTIInternational/teehr)
 0.8.0. It knows no model: it reads `teehr-timeseries`, which a model's own tool writes (for NextGen,
-`ngiab-to-cng --format teehr-timeseries`). Design: hydrowf-core `docs/design/teehr-evaluation.md`.
+`ngiab-to-cng --format teehr-timeseries`). Design: [docs/design/teehr-evaluation.md](../../docs/design/teehr-evaluation.md).
 
 ```sh
 teehr-evaluate <teehr-timeseries dir or s3://bucket/prefix/> --output <dir> \
