@@ -5,12 +5,12 @@
 #
 #   nextgen/ngiab-to-cng/tests/teehr-timeseries.sh      (from the repository root; needs Docker)
 #
-# Images: hydrowf/ngiab-to-cng:0.4.0 (built from this folder) and an image with teehr 0.8.0 and its Spark
+# Images: hydrowf/ngiab-to-cng:0.4.1 (built from this folder) and an image with teehr 0.8.0 and its Spark
 # jars (TEEHR, see the teehr-evaluate tool; any image where `from teehr import Evaluation` works offline).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 TEST_RUN=$ROOT/nextgen/ngiab-run/tests/ngen-run      # one gaged flowpath: wb-2658, USGS 01031510
-TO_CNG=${TO_CNG:-hydrowf/ngiab-to-cng:0.4.0}
+TO_CNG=${TO_CNG:-hydrowf/ngiab-to-cng:0.4.1}
 TEEHR=${TEEHR:?set TEEHR to an image with teehr 0.8.0 (and its Spark jars) installed}
 ME="$(id -u):$(id -g)"
 
@@ -43,7 +43,7 @@ files = sorted(os.path.relpath(os.path.join(d, f), out) for d, _, fs in os.walk(
 assert files == ["crosswalk.parquet", "manifest.json", "timeseries/secondary.parquet"], files
 
 m = json.load(open(f"{out}/manifest.json"))
-assert m["tool"] == {"name": "ngiab-to-cng", "version": "0.4.0"} and m["manifest_version"] == "0.4", m["tool"]
+assert m["tool"] == {"name": "ngiab-to-cng", "version": "0.4.1"} and m["manifest_version"] == "0.4", m["tool"]
 assert m["format"] == "teehr-timeseries", m.get("format")
 t = m["teehr"]
 assert t["schema"].startswith("teehr.secondary_timeseries@0.8"), t
@@ -104,7 +104,7 @@ docker run --rm --network none --user "$ME" -v "$W/run:/in/ngen-run:ro" -v "$W:/
 py '
 import json, os
 m = json.load(open("/w/cng/manifest.json"))
-assert m["tool"]["version"] == "0.4.0" and m["format"] == "ngen-cng" and "rerun" in m, m["tool"]
+assert m["tool"]["version"] == "0.4.1" and m["format"] == "ngen-cng" and "rerun" in m, m["tool"]
 assert os.path.exists("/w/cng/timeseries/troute.parquet") and not os.path.exists("/w/cng/crosswalk.parquet")
 print("   ngen-cng, with rerun/ and timeseries/troute.parquet")
 ' || fail "default format"
@@ -218,6 +218,17 @@ cp -r "$TEST_RUN" "$W/transposed"
 py 'import xarray as xr; p = "/w/transposed/outputs/troute/troute_output_202001010000.nc"
 ds = xr.load_dataset(p); ds["flow"] = ds["flow"].transpose("time", "feature_id"); ds.to_netcdf(p)'
 refuses "not (feature_id, time)" transposed
+
+echo "== refused before converting, in either format: a configuration name TEEHR uses for its own data"
+for case in usgs_observations:teehr-timeseries nwm30_retrospective:teehr-timeseries usgs_observations:ngen-cng; do
+  name=${case%%:*} fmt=${case#*:}
+  if docker run --rm --network none --user "$ME" -v "$W/run:/in/ngen-run:ro" -v "$W:/out" "$TO_CNG" /in/ngen-run \
+       --output "/out/reserved-$name" --configuration-name "$name" --format "$fmt" >/dev/null 2>"$W/err"
+  then fail "accepted --configuration-name $name ($fmt)"; fi
+  grep -qF "is TEEHR's own" "$W/err" || fail "refused $name ($fmt) for another reason: $(tail -1 "$W/err")"
+  [ ! -e "$W/reserved-$name" ] || fail "wrote output before refusing $name ($fmt)"
+  echo "   refused: $(tail -1 "$W/err")"
+done
 
 echo "== refused: a format it does not write"
 if docker run --rm --network none --user "$ME" -v "$W/run:/in/ngen-run:ro" -v "$W:/out" "$TO_CNG" \

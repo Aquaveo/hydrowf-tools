@@ -27,7 +27,7 @@ $namespaces:
 requirements:
   DockerRequirement:
     # Local image built from Dockerfile in this folder
-    dockerPull: hydrowf/ngiab-to-cng:0.4.0
+    dockerPull: hydrowf/ngiab-to-cng:0.4.1
     dockerOutputDirectory: /cwl-output   # fixed path, so --cachedir keys repeat (cwltool otherwise picks a random one per run)
   ResourceRequirement:
     coresMin: 1

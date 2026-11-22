@@ -36,7 +36,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-TOOL_VERSION = "0.1.0"
+TOOL_VERSION = "0.1.1"          # 0.1.1: a repeated metric is dropped, not refused
 MANIFEST_VERSION = "0.2"                        # bbox (WGS84) and start/end_datetime, for the job's STAC Item
 INPUT_FORMAT = "teehr-timeseries"
 INPUT_SCHEMA = "teehr.secondary_timeseries@0.8."     # the teehr minor version this tool is built with
@@ -58,13 +58,14 @@ USGS_BATCH = 100                                # sites per monitoring-locations
 
 
 def parse_metrics(text: str) -> list[str]:
-    """`kge,nse,...` -> the names, in order. Refuses an unknown or repeated name."""
+    """`kge,nse,...` -> the names, in order, each once (a repeat is dropped: the registry's pattern can't refuse
+    it, and refusing here would fail a run only after its simulation). Refuses an unknown or empty name."""
     names = [n.strip() for n in text.split(",")]
     unknown = [n for n in names if n not in METRICS]
-    if unknown or len(set(names)) != len(names) or not names:
-        raise SystemExit(f"--metrics {text!r}: give distinct names from {', '.join(METRICS)}"
-                         + (f" (unknown: {', '.join(unknown)})" if unknown else ""))
-    return names
+    if unknown:
+        raise SystemExit(f"--metrics {text!r}: give names from {', '.join(METRICS)} "
+                         f"(unknown: {', '.join(map(repr, unknown))})")
+    return list(dict.fromkeys(names))
 
 
 def read_input(url: str) -> tuple[dict, pd.DataFrame, pd.DataFrame, list[dict]]:

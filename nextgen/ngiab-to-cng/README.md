@@ -39,7 +39,10 @@ named after the run folder so two conversions in one pipeline don't collide, in 
   NGWPC/icefabric at commit 9bcff38 (BSD-2-Clause, `LICENSE.icefabric`). Columns the community gpkg lacks
   (`divide-attributes.glacier_percent`) are null; `hydrolocations` has no geometry in that schema.
 - SUMMA's `outputs/summa/` is listed in the manifest as not converted.
-- Image: local `hydrowf/ngiab-to-cng:0.4.0` built from `Dockerfile`; dependencies pinned in `requirements.txt`
+- Refused before converting, in either format: a `--configuration-name` TEEHR uses for its own data
+  (`usgs_observations`, `nwm30_retrospective`). In a pipeline the run has happened by then: the name is to be
+  checked when the job is submitted, in hydrowf-ogc's registry.
+- Image: local `hydrowf/ngiab-to-cng:0.4.1` built from `Dockerfile`; dependencies pinned in `requirements.txt`
   (from `requirements.in` with `uv pip compile`).
 
 ### teehr-timeseries

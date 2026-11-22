@@ -17,7 +17,7 @@ What it does:
    another format; a TEEHR schema other than 0.8; names other than `streamflow_hourly_inst` in `m^3/s`, in the
    manifest or the rows; a `configuration_name` missing, TEEHR's own (`usgs_observations`,
    `nwm30_retrospective`) or not the rows'; a crosswalk id other than `usgs-<site number>`, an empty secondary
-   id, or a gage with several series; a missing file or column; an unknown or repeated metric.
+   id, or a gage with several series; a missing file or column; an unknown metric (a repeated one is dropped).
 2. Gets each gage's point from the USGS site service (Water Data API monitoring locations).
 3. Fetches the gages' hourly observations over the series' period (`fetch.usgs_streamflow`, instantaneous
    values on the hour, SI). `API_USGS_PAT` raises the API's rate limit; without it the anonymous limit applies.
@@ -45,7 +45,7 @@ Notes:
 
 ## Image
 
-`hydrowf/teehr-evaluate:0.1.0` from `Dockerfile`; dependencies pinned in `requirements.txt` (from
+`hydrowf/teehr-evaluate:0.1.1` from `Dockerfile`; dependencies pinned in `requirements.txt` (from
 `requirements.in` with `uv pip compile`).
 
 - teehr resolves its Spark packages from Maven on every session. The image creates one evaluation at build,
