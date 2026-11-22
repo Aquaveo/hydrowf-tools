@@ -12,6 +12,7 @@ and the pipelines built from them.
 | `evaluation/<tool>/` | same, for model-agnostic evaluation tools (e.g. `teehr-evaluate`) |
 | `pipelines/` | CWL Workflows that chain tools |
 | `hints/` | the `hydrowf:` hint vocabulary and the supported CWL subset |
+| `docs/design/` | designs of the tools here (e.g. [TEEHR evaluation](docs/design/teehr-evaluation.md)) |
 
 ## Conventions
 

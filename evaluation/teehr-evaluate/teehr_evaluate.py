@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Evaluate a simulation's time series against USGS observations with TEEHR.
 
-Reads a teehr-timeseries directory (any model's tool can write one; hydrowf-core docs/design/teehr-evaluation.md):
+Reads a teehr-timeseries directory (any model's tool can write one; this repository's docs/design/teehr-evaluation.md):
   manifest.json                    format teehr-timeseries, and `teehr`: schema version and names
   timeseries/secondary.parquet     the simulated series, in TEEHR's secondary timeseries schema
   crosswalk.parquet                secondary_location_id -> primary_location_id (usgs-<site>)
